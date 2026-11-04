@@ -1,0 +1,9 @@
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+UsePAM no
+StrictModes no
+PermitRootLogin no
+Subsystem sftp /usr/lib/openssh/sftp-server

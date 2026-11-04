@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ate-ssh-gateway
+  labels:
+    # Lets the gateway reach ate-api (see ate-system-networkpolicies.yaml).
+    ate.dev/api-access: "true"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ssh-gateway
+  namespace: ate-ssh-gateway
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ssh-gateway-state
+  namespace: ate-ssh-gateway
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ssh-gateway
+  namespace: ate-ssh-gateway
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # one writer for the pinned-host-keys file
+  selector:
+    matchLabels:
+      app: ssh-gateway
+  template:
+    metadata:
+      labels:
+        app: ssh-gateway
+    spec:
+      serviceAccountName: ssh-gateway
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+      - name: ssh-gateway
+        image: localhost:5001/sshgateway@sha256:58c12f186b83aa74273ca3b2da91b62ef5149512c1ff37a4deaf84ae66708418
+        args:
+        - -listen=:2222
+        - -host-key=/etc/ssh-gateway/keys/host_key
+        - -upstream-key=/etc/ssh-gateway/keys/upstream_key
+        - -ca-pub=/etc/ssh-gateway/ca/ca_key.pub
+        - -actor-hostkeys=/var/lib/ssh-gateway/upstream_hostkeys.json
+        - -router-addr=atenet-router.ate-system.svc:8444
+        - -api-addr=api.ate-system.svc:443
+        - -policy-ttl=30s
+        - -recheck=30s
+        ports:
+        - name: ssh
+          containerPort: 2222
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {memory: 256Mi}
+        volumeMounts:
+        - {name: keys, mountPath: /etc/ssh-gateway/keys, readOnly: true}
+        - {name: ca, mountPath: /etc/ssh-gateway/ca, readOnly: true}
+        - {name: state, mountPath: /var/lib/ssh-gateway}
+        - {name: podidentity, mountPath: /run/podidentity.podcert.ate.dev, readOnly: true}
+        - {name: servicedns-ca, mountPath: /run/trust/servicedns, readOnly: true}
+        - {name: api-token, mountPath: /var/run/secrets/ate, readOnly: true}
+      volumes:
+      - name: keys
+        secret:
+          secretName: ssh-gateway-keys
+          defaultMode: 0440
+      - name: ca
+        configMap:
+          name: ssh-gateway-ca
+      - name: state
+        persistentVolumeClaim:
+          claimName: ssh-gateway-state
+      # Client certificate presented to atenet-router; its SPIFFE ID is
+      # spiffe://cluster.local/ns/ate-ssh-gateway/sa/ssh-gateway.
+      - name: podidentity
+        projected:
+          sources:
+          - podCertificate:
+              signerName: podidentity.podcert.ate.dev/identity
+              keyType: ECDSAP256
+              credentialBundlePath: credential-bundle.pem
+      # Verifies the serving certificates of atenet-router and ate-api.
+      - name: servicedns-ca
+        projected:
+          sources:
+          - clusterTrustBundle:
+              signerName: servicedns.podcert.ate.dev/identity
+              labelSelector:
+                matchLabels:
+                  podcert.ate.dev/canarying: live
+              path: trust-bundle.pem
+      # Bearer token for ate-api. The principal is the token's sub:
+      # system:serviceaccount:ate-ssh-gateway:ssh-gateway.
+      - name: api-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              audience: api.ate-system.svc
+              expirationSeconds: 3600
+              path: token
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ssh-gateway
+  namespace: ate-ssh-gateway
+spec:
+  type: ClusterIP   # use LoadBalancer on a real cluster; port-forward on kind
+  selector:
+    app: ssh-gateway
+  ports:
+  - name: ssh
+    port: 22
+    targetPort: ssh

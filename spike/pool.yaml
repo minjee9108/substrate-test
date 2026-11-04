@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ate-spike-ssh
+---
+apiVersion: ate.dev/v1
+kind: WorkerPool
+metadata:
+  name: ssh-workerpool
+  namespace: ate-spike-ssh
+  labels:
+    workload: sshspike
+spec:
+  replicas: 1
+  workerImage: localhost:5001/ateworker-gvisor@sha256:e32a43657e68b177f4ff203559b78871109bafcc0d33833c4c7628dedd845de1
+  sandboxClasses:
+  - name: gvisor
+  template:
+    resources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 1Gi

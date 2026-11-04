@@ -1,0 +1,4 @@
+bindings:
+- role: viewer
+  members:
+  - user:system:serviceaccount:ate-ssh-gateway:ssh-gateway

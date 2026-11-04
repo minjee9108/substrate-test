@@ -1,0 +1,21 @@
+metadata:
+  atespace: ate-spike-ssh
+  name: ssh-template-v6
+workerSelector:
+  matchLabels:
+    workload: sshspike
+containers:
+- name: ssh
+  image: localhost:5001/sshspike@sha256:59110b99c654d090aae4bd4b577a413f8534d69c1b9d136afa431638866ac46d
+  securityContext:
+    capabilities:
+      add: [SYS_CHROOT, SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER]
+resources:
+  limits:
+    cpuMillicores: 500
+    memoryBytes: 805306368
+snapshotConfig:
+  preferredFidelity: SNAPSHOT_FIDELITY_MEMORY
+workerSelector:
+  matchLabels:
+    workload: sshspike

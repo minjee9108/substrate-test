@@ -1,0 +1,29 @@
+# Egress policy used for the SSH actors. Create with:
+#   kubectl ate create egress-policy <actor> -a <atespace> -f egress-policy.yaml
+rules:
+- tlsPassthrough:
+    hostnames:
+    - api.anthropic.com
+    - claude.ai
+    - platform.claude.com
+    - downloads.claude.ai
+    - statsig.anthropic.com
+    - github.com
+    - api.github.com
+    - codeload.github.com
+    - objects.githubusercontent.com
+    - registry.npmjs.org
+    - raw.githubusercontent.com
+    - uploads.github.com
+    - gist.github.com
+    - gist.githubusercontent.com
+    - release-assets.githubusercontent.com
+    - github-releases.githubusercontent.com
+    - github-cloud.githubusercontent.com
+    - camo.githubusercontent.com
+    - avatars.githubusercontent.com
+    - ghcr.io
+    - pkg-containers.githubusercontent.com
+    ports:
+      numbers:
+      - 443
