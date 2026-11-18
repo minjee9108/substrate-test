@@ -48,7 +48,7 @@ spec:
         fsGroup: 65532
       containers:
       - name: ssh-gateway
-        image: localhost:5001/sshgateway@sha256:58c12f186b83aa74273ca3b2da91b62ef5149512c1ff37a4deaf84ae66708418
+        image: localhost:5001/sshgateway@sha256:9b20ade75fa6e1e7b99839add7f7353aa25b22553e70891a94d936f750cc984f
         args:
         - -listen=:2222
         - -host-key=/etc/ssh-gateway/keys/host_key
@@ -59,9 +59,16 @@ spec:
         - -api-addr=api.ate-system.svc:443
         - -policy-ttl=30s
         - -recheck=30s
+        # Desktop HTTP gateway: <actor>--<atespace>.<domain>. Keys come from the
+        # http-gateway-token-pub ConfigMap (see README).
+        - -http-listen=:8080
+        - -http-domain=localhost
+        - -token-pub=/etc/ssh-gateway/token/token_pub
         ports:
         - name: ssh
           containerPort: 2222
+        - name: http
+          containerPort: 8080
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
@@ -73,6 +80,7 @@ spec:
         volumeMounts:
         - {name: keys, mountPath: /etc/ssh-gateway/keys, readOnly: true}
         - {name: ca, mountPath: /etc/ssh-gateway/ca, readOnly: true}
+        - {name: token, mountPath: /etc/ssh-gateway/token, readOnly: true}
         - {name: state, mountPath: /var/lib/ssh-gateway}
         - {name: podidentity, mountPath: /run/podidentity.podcert.ate.dev, readOnly: true}
         - {name: servicedns-ca, mountPath: /run/trust/servicedns, readOnly: true}
@@ -85,6 +93,9 @@ spec:
       - name: ca
         configMap:
           name: ssh-gateway-ca
+      - name: token
+        configMap:
+          name: http-gateway-token-pub
       - name: state
         persistentVolumeClaim:
           claimName: ssh-gateway-state
@@ -130,3 +141,6 @@ spec:
   - name: ssh
     port: 22
     targetPort: ssh
+  - name: http
+    port: 80
+    targetPort: http

@@ -1,0 +1,8 @@
+# Test policy: allow any HTTPS host (TLS passthrough, port 443). No hostname control.
+rules:
+- tlsPassthrough:
+    hostnames:
+    - "*"
+    ports:
+      numbers:
+      - 443

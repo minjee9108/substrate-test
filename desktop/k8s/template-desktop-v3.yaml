@@ -1,0 +1,33 @@
+metadata:
+  atespace: ate-spike-ssh
+  name: desktop-template-v3
+workerSelector:
+  matchLabels:
+    workload: desktoppoc
+containers:
+# SSH container: gives us the existing gateway path, and ssh -L reaches the desktop on localhost:3000.
+- name: ssh
+  image: localhost:5001/sshspike@sha256:59110b99c654d090aae4bd4b577a413f8534d69c1b9d136afa431638866ac46d
+  securityContext:
+    capabilities:
+      add: [SYS_CHROOT, SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER]
+# Desktop container: LinuxServer webtop (Ubuntu, XFCE), web UI on :3000
+- name: desktop
+  image: localhost:5001/webtop-gvisor@sha256:d4f18dea9e7a0d269c358d727f007f89a955dc8f96ebc4994b257ed6675197be
+  securityContext:
+    capabilities:
+      add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, FSETID, SYS_CHROOT]   # s6-overlay and nginx change owners and switch users
+  env:
+  - {name: PUID, value: "1000"}
+  - {name: PGID, value: "1000"}
+  - {name: TZ, value: Australia/Sydney}
+  - {name: TITLE, value: Substrate desktop}
+  - {name: SELKIES_SCALING_DPI, value: "96"}            # ignore the browser's DPI (a HiDPI laptop sent 288)
+  - {name: SELKIES_MANUAL_WIDTH, value: "1920"}          # fixed screen size, forces manual resolution mode
+  - {name: SELKIES_MANUAL_HEIGHT, value: "1080"}
+resources:
+  limits:
+    cpuMillicores: 3000
+    memoryBytes: 4294967296
+snapshotConfig:
+  preferredFidelity: SNAPSHOT_FIDELITY_MEMORY

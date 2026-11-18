@@ -1,0 +1,22 @@
+# A larger worker pool for desktop actors. Same namespace and atespace as the SSH POC, so the
+# existing alice editor policy and the in-cluster SSH gateway apply.
+apiVersion: ate.dev/v1
+kind: WorkerPool
+metadata:
+  name: desk-workerpool
+  namespace: ate-spike-ssh
+  labels:
+    workload: desktoppoc
+spec:
+  replicas: 1
+  workerImage: localhost:5001/ateworker-gvisor@sha256:e32a43657e68b177f4ff203559b78871109bafcc0d33833c4c7628dedd845de1
+  sandboxClasses:
+  - name: gvisor
+  template:
+    resources:
+      limits:
+        cpu: "4"
+        memory: 6Gi
+      requests:
+        cpu: 500m
+        memory: 2Gi

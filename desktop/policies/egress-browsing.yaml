@@ -1,0 +1,13 @@
+# Phase 0 browsing test: a few Google hosts as plain TLS passthrough (WebSocket works inside passthrough).
+rules:
+- tlsPassthrough:
+    hostnames:
+    - google.com
+    - www.google.com
+    - "*.google.com"
+    - "*.gstatic.com"
+    - "*.googleapis.com"
+    - "*.googleusercontent.com"
+    ports:
+      numbers:
+      - 443

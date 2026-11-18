@@ -13,10 +13,12 @@ the issues, and the limitations.
   channel proxy, in-cluster router and `ate-api` clients, tests, Dockerfile, and Kubernetes manifest.
 - `gateway/ateapi/` is a copy of the generated `ate-api` Go package from the Substrate repo
   (`api/ateapi/v1`, Apache-2.0, Google LLC). It is here only so the gateway builds on its own.
+- `desktop/` is the virtual desktop POC (webtop in an actor, behind an owner-only HTTP gateway).
+  Read [desktop_poc_report.md](desktop_poc_report.md).
 - `policies/` holds the egress and global access policies we used.
 
 ## Not included
-- Private keys, the SSH CA key, host keys, pin files, logs, and binaries. Generate your own:
+- Private keys, the desktop token signing key, the SSH CA key, host keys, pin files, logs, and binaries. Generate your own:
   `ssh-keygen -t ed25519` for the gateway host key, the upstream key (public half goes in
   `spike/bridge/authorized_keys`), and the CA key.
 - `spike/bridge/authorized_keys` is a placeholder for your gateway upstream public key.

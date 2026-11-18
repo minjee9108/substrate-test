@@ -25,17 +25,23 @@ import (
 )
 
 var (
-	listen      = flag.String("listen", "127.0.0.1:2222", "listen address")
-	hostKeyPath = flag.String("host-key", "hostkey", "gateway SSH host key")
-	usersPath   = flag.String("users", "", "static key registry: <pubkey> <principal> per line (optional; certificates are preferred)")
-	caPath      = flag.String("ca-pub", "", "trusted SSH CA public key(s), one per line; enables certificate login")
-	pinsPath    = flag.String("actor-hostkeys", "upstream_hostkeys.json", "file recording each actor's pinned SSH host key")
-	maxCertLife = flag.Duration("max-cert-lifetime", 24*time.Hour, "reject certificates valid for longer than this")
-	upKeyPath   = flag.String("upstream-key", "upstream_key", "key the actor's sshd trusts")
-	kubectlAte  = flag.String("kubectl-ate", os.ExpandEnv("$HOME/go/bin/kubectl-ate"), "kubectl-ate binary")
-	kubeCtx     = flag.String("context", "kind-kind", "kube context")
-	policyTTL   = flag.Duration("policy-ttl", 30*time.Second, "how long an access policy is cached; revocations apply within this")
-	recheck     = flag.Duration("recheck", 30*time.Second, "how often live sessions are re-authorized")
+	listen            = flag.String("listen", "127.0.0.1:2222", "listen address")
+	hostKeyPath       = flag.String("host-key", "hostkey", "gateway SSH host key")
+	usersPath         = flag.String("users", "", "static key registry: <pubkey> <principal> per line (optional; certificates are preferred)")
+	caPath            = flag.String("ca-pub", "", "trusted SSH CA public key(s), one per line; enables certificate login")
+	pinsPath          = flag.String("actor-hostkeys", "upstream_hostkeys.json", "file recording each actor's pinned SSH host key")
+	maxCertLife       = flag.Duration("max-cert-lifetime", 24*time.Hour, "reject certificates valid for longer than this")
+	upKeyPath         = flag.String("upstream-key", "upstream_key", "key the actor's sshd trusts")
+	kubectlAte        = flag.String("kubectl-ate", os.ExpandEnv("$HOME/go/bin/kubectl-ate"), "kubectl-ate binary")
+	kubeCtx           = flag.String("context", "kind-kind", "kube context")
+	policyTTL         = flag.Duration("policy-ttl", 30*time.Second, "how long an access policy is cached; revocations apply within this")
+	recheck           = flag.Duration("recheck", 30*time.Second, "how often live sessions are re-authorized")
+	upstreamKeepalive = flag.Duration("upstream-keepalive", 60*time.Second, "interval of SSH keepalives sent to the actor, to keep the router tunnel from idling out")
+
+	httpListen = flag.String("http-listen", "", "address of the desktop HTTP gateway (disabled if empty)")
+	httpDomain = flag.String("http-domain", "localhost", "desktops are served at <actor>--<atespace>.<this domain>")
+	httpPort   = flag.String("http-actor-port", "3000", "actor port the desktop listens on")
+	tokenPub   = flag.String("token-pub", "", "base64 Ed25519 public keys that verify desktop login tokens")
 
 	// In-cluster mode: talk to the router and ate-api directly, with the pod's own identity.
 	routerAddr   = flag.String("router-addr", "", "atenet-router CONNECT-TLS host:port; enables direct (in-cluster) dialing instead of kubectl-ate")
@@ -101,6 +107,10 @@ func main() {
 		issueMain(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "issue-token" {
+		issueTokenMain(os.Args[2:])
+		return
+	}
 	flag.Parse()
 	users := map[string]user{}
 	if *usersPath != "" {
@@ -146,6 +156,26 @@ func main() {
 	upSigner, err := readSigner(*upKeyPath)
 	if err != nil {
 		log.Fatalf("upstream key: %v", err)
+	}
+
+	if *httpListen != "" {
+		if *tokenPub == "" {
+			log.Fatal(errNoTokenKeys)
+		}
+		if router == nil {
+			log.Fatal("-http-listen needs -router-addr")
+		}
+		keys, err := loadTokenKeys(*tokenPub)
+		if err != nil {
+			log.Fatalf("token keys: %v", err)
+		}
+		tr := newTracker()
+		go tr.run(context.Background(), authz, *recheck)
+		hg := newHTTPGateway(*httpDomain, *httpPort, keys, authz, router, tr)
+		go func() {
+			log.Printf("desktop http gateway listening on %s for *.%s", *httpListen, *httpDomain)
+			log.Fatal((&http.Server{Addr: *httpListen, Handler: hg, ReadHeaderTimeout: 20 * time.Second}).ListenAndServe())
+		}()
 	}
 
 	cfg := &ssh.ServerConfig{
@@ -354,7 +384,25 @@ func dialUpstream(atespace, actor string, signer ssh.Signer) (*ssh.Client, func(
 		return nil, nil, fmt.Errorf("upstream ssh: %w", err)
 	}
 	client := ssh.NewClient(c, chans, reqs)
-	return client, func() { client.Close(); kill() }, nil
+	// The router drops a tunnel that carries no bytes for 5 minutes. A client's own keepalives end at
+	// the gateway, so send one upstream as well. A failed keepalive means the actor side is gone.
+	stopKeepalive := make(chan struct{})
+	go func() {
+		t := time.NewTicker(*upstreamKeepalive)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopKeepalive:
+				return
+			case <-t.C:
+				if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+					client.Close()
+					return
+				}
+			}
+		}
+	}()
+	return client, func() { close(stopKeepalive); client.Close(); kill() }, nil
 }
 
 // proxyChannel opens the same channel type on the upstream connection and
