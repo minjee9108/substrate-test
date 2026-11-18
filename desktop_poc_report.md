@@ -11,7 +11,7 @@
 ## 1. Summary
 
 - The requirement: business users who want a graphical desktop, reachable only by the person who owns the actor.
-- A webtop desktop runs in a Substrate gVisor actor and shows in a normal browser. It needed four image and template fixes (section 4).
+- A webtop desktop runs in a Substrate gVisor actor and shows in a normal browser. It needed four image and template fixes (section 5).
 - The desktop survives suspend and resume. Open windows and unsaved text came back. Suspend took about 5s and resume about 1s.
 - An HTTP gateway now sits in front of the desktop. It reuses the SSH gateway's router dialer and ownership rule.
   - Host name: `<actor>--<atespace>.<domain>`.
@@ -23,7 +23,54 @@
 
 ---
 
-## 2. What we tried
+## 2. Architecture
+
+```mermaid
+flowchart LR
+    B["Browser<br/>(business user)"] -->|"HTTPS + WebSocket<br/>host: actor--atespace.domain<br/>session cookie"| H
+    subgraph GW["ssh-gateway pod (ate-ssh-gateway)"]
+        H["HTTP gateway<br/>token check, ownership check,<br/>reverse proxy, tunnel sweep"]
+        S["SSH gateway<br/>(Claude Desktop path)"]
+    end
+    H -->|"policy read (cached 30s)"| API["ate-api<br/>access policies"]
+    H -->|"CONNECT-TLS :8444<br/>gateway SPIFFE cert"| R["atenet-router<br/>SPIFFE allowlist"]
+    S --> R
+    S --> API
+    R -->|"tunnel to actor port 3000"| D
+    subgraph A["Actor (gVisor, one sandbox, shared network)"]
+        D["desktop container<br/>webtop: XFCE + Selkies<br/>port 3000"]
+        SS["ssh container<br/>sshbridge + sshd"]
+    end
+    E["Entra ID<br/>(planned, replaces test token)"] -.->|"OIDC token"| H
+    D -->|"egress policy"| X["atenet-egress<br/>allowed HTTPS hosts"]
+```
+
+The browser never talks to the actor directly. The only listed identity on the router is the gateway, so the gateway is the one place that decides who gets in.
+
+| Component | What it does |
+|---|---|
+| Browser | Shows the desktop. It opens one URL per actor, `<actor>--<atespace>.<domain>`, and keeps a session cookie set at login. |
+| HTTP gateway (`httpgw.go`) | Verifies the token, checks the user is a global owner, atespace owner or atespace editor, then reverse-proxies HTTP and WebSocket to the actor. It removes the token and cookie before forwarding and writes an audit line per tunnel. |
+| Tunnel tracker | Records every open tunnel with its owner and token expiry. A sweep every 30s closes tunnels whose token expired or whose owner lost access. Together with the 30s policy cache this cuts a revoked user off in about 60s. |
+| Token (`token.go`) | A signed JWT (Ed25519) carrying the subject and expiry. It stands in for the Entra token. Entra OIDC would replace the login step and keep the rest. |
+| SSH gateway | The earlier component for Claude Desktop. It shares the process, the router dialer, the authorizer and the upstream keepalive with the HTTP gateway. |
+| `ate-api` | Holds the access policies. The gateway reads them with its own service account token, never the user's. |
+| `atenet-router` | Opens a tunnel to a named actor. It accepts only SPIFFE identities on its allowlist, and the gateway's service account is the identity it needs. It drops a tunnel idle for 5 minutes. |
+| Actor | One gVisor sandbox that holds two containers on one network. `desktop` runs webtop (XFCE streamed by Selkies on port 3000, no login of its own). `ssh` runs `sshbridge` and `sshd` for the SSH path. |
+| `atenet-egress` | Applies the per-actor egress policy. Without a policy the actor has no DNS, and with the allow-all rule it can reach any HTTPS host. |
+| Entra ID (planned) | Would sign users in and provide the subject that maps to a Substrate principal. |
+
+Request flow for one desktop request:
+
+1. The browser asks for `desk-4--ate-spike-ssh.<domain>`. The gateway splits the host into actor `desk-4` and atespace `ate-spike-ssh`.
+2. It verifies the token from the cookie or `Authorization` header. A missing or bad token gets 401.
+3. It checks the subject against the atespace policy. A user without a role gets 403. A policy read failure gets 503.
+4. It opens a CONNECT tunnel through the router to port 3000 of the actor and registers it with the tracker.
+5. It copies HTTP and WebSocket traffic both ways until either side closes or the sweep closes the tunnel.
+
+---
+
+## 3. What we tried
 
 - **Phase 0. Desktop in an actor, reached over SSH.**
   - A template with two containers: the existing `ssh` image and the `desktop` image.
@@ -40,7 +87,7 @@
 
 ---
 
-## 3. Results
+## 4. Results
 
 | Check | Result |
 |---|---|
@@ -53,13 +100,13 @@
 | Revoke `alice` (editor to viewer) | Open tunnel closed after 59s. New requests got 403 after 60s |
 | Golden snapshot build | About 35 to 47s |
 | Resume from the golden snapshot | About 1s |
-| Idle for 6+ minutes through the router | Works after the keepalive fix (section 5) |
+| Idle for 6+ minutes through the router | Works after the keepalive fix (section 6) |
 
 The 60s revocation time is the 30s policy cache plus the 30s sweep.
 
 ---
 
-## 4. What the desktop needed in gVisor
+## 5. What the desktop needed in gVisor
 
 - **Capabilities.** The `desktop` container needs `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, `FOWNER`, `FSETID`, `SYS_CHROOT`. Without them s6-overlay and nginx fail with `Operation not permitted` and the container crash-loops.
 - **A shim for `bwrap`.**
@@ -79,7 +126,7 @@ Files: `desktop/image/`, `desktop/k8s/template-desktop-v3.yaml`, `desktop/polici
 
 ---
 
-## 5. Problems found and what we did
+## 6. Problems found and what we did
 
 - **The router drops a tunnel after 5 minutes of idle.**
   - The SSH keepalives from the client end at the gateway and are not forwarded to the actor.
@@ -90,7 +137,7 @@ Files: `desktop/image/`, `desktop/k8s/template-desktop-v3.yaml`, `desktop/polici
 
 ---
 
-## 6. Limitations
+## 7. Limitations
 
 - **No Entra sign-in.** The token is signed by a key we made. A real deployment needs the OIDC flow and a mapping from an Entra subject to the Substrate principal.
 - **The router still accepts `atenet-client`.** Until it is removed from the router allowlist, `kubectl ate proxy` reaches the desktop without the gateway. The desktop has no login of its own.
@@ -104,7 +151,7 @@ Files: `desktop/image/`, `desktop/k8s/template-desktop-v3.yaml`, `desktop/polici
 
 ---
 
-## 7. Next steps
+## 8. Next steps
 
 1. Auto-resume a suspended desktop on request. The gateway needs `editor` on the atespace to call resume.
 2. Remove `atenet-client` from the router allowlist in a test install and confirm direct access is rejected.
@@ -114,7 +161,7 @@ Files: `desktop/image/`, `desktop/k8s/template-desktop-v3.yaml`, `desktop/polici
 
 ---
 
-## 8. Files
+## 9. Files
 
 - `gateway/httpgw.go`, `gateway/token.go`, `gateway/httpgw_test.go`: the HTTP gateway, the test token, and tests.
 - `gateway/main.go`: new flags (`-http-listen`, `-http-domain`, `-http-actor-port`, `-token-pub`, `-upstream-keepalive`) and `issue-token`.
