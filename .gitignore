@@ -1,1 +1,4 @@
 gateway/image/ssh-gateway
+agent-sandbox/gateway/image/ssh-gateway
+agent-sandbox/gw-tool
+agent-sandbox/keys/

@@ -1,0 +1,42 @@
+# webtop in an agent-sandbox Sandbox. Default runtime (runc), no capability changes.
+apiVersion: agents.x-k8s.io/v1beta1
+kind: Sandbox
+metadata:
+  name: desk-1
+  namespace: team-a
+spec:
+  service: true            # headless Service desk-1.team-a.svc
+  podTemplate:
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: desktop
+        image: lscr.io/linuxserver/webtop:ubuntu-xfce
+        imagePullPolicy: Never
+        ports:
+        - {name: http, containerPort: 3000}
+        env:
+        - {name: PUID, value: "1000"}
+        - {name: PGID, value: "1000"}
+        - {name: TZ, value: Australia/Sydney}
+        - {name: TITLE, value: Sandbox desktop}
+        - {name: SELKIES_SCALING_DPI, value: "96"}
+        - {name: SELKIES_MANUAL_WIDTH, value: "1920"}
+        - {name: SELKIES_MANUAL_HEIGHT, value: "1080"}
+        resources:
+          requests: {cpu: 500m, memory: 2Gi}
+          limits: {memory: 4Gi}
+        readinessProbe:
+          tcpSocket: {port: http}
+          periodSeconds: 5
+        volumeMounts:
+        - {name: config, mountPath: /config}
+        - {name: shm, mountPath: /dev/shm}
+      volumes:
+      - name: shm
+        emptyDir: {medium: Memory, sizeLimit: 1Gi}
+  volumeClaimTemplates:
+  - metadata: {name: config}
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources: {requests: {storage: 5Gi}}

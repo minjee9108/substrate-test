@@ -1,0 +1,45 @@
+apiVersion: agents.x-k8s.io/v1beta1
+kind: Sandbox
+metadata:
+  name: ssh-1
+  namespace: team-a
+spec:
+  service: true                      # headless Service ssh-1.team-a.svc, the stable address
+  podTemplate:
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: ssh
+        image: ssh-sandbox:v1
+        imagePullPolicy: Never       # kind-local image
+        ports:
+        - name: ssh
+          containerPort: 22
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+            add: [SYS_CHROOT, SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, AUDIT_WRITE]   # sshd privilege separation; AUDIT_WRITE lets sshd log pty logins
+        resources:
+          requests: {cpu: 250m, memory: 512Mi}
+          limits: {memory: 2Gi}
+        readinessProbe:
+          tcpSocket: {port: ssh}
+          periodSeconds: 5
+        volumeMounts:
+        - {name: home, mountPath: /home/dev}
+        - {name: sshd-host, mountPath: /var/lib/sshd-host}
+        - {name: ssh-authorized-keys, mountPath: /etc/ssh-authorized, readOnly: true}
+      volumes:
+      - name: ssh-authorized-keys
+        secret:
+          secretName: ssh-authorized-keys
+  volumeClaimTemplates:
+  - metadata: {name: home}
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources: {requests: {storage: 5Gi}}
+  - metadata: {name: sshd-host}
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources: {requests: {storage: 16Mi}}

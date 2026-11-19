@@ -15,6 +15,8 @@ the issues, and the limitations.
   (`api/ateapi/v1`, Apache-2.0, Google LLC). It is here only so the gateway builds on its own.
 - `desktop/` is the virtual desktop POC (webtop in an actor, behind an owner-only HTTP gateway).
   Read [desktop_poc_report.md](desktop_poc_report.md).
+- `agent-sandbox/` is the same experiments on kubernetes-sigs/agent-sandbox (SSH gateway and desktop).
+  Read [desktop_comparison.md](desktop_comparison.md) for the side-by-side.
 - `policies/` holds the egress and global access policies we used.
 
 ## Not included
